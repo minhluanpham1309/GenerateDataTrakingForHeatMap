@@ -23,40 +23,42 @@ def generate_record(record_id, url_id, long_data=False):
         base_url = f"https://{utm_data['source']}.com/"
         
         if long_data:
+            # Tạo URL dài 200-400 ký tự bằng cách giới hạn số parameter
             params = [
                 f"utm_source={utm_data['source']}",
                 f"utm_medium={utm_data['medium']}", 
                 f"utm_campaign={random.choice(CAMPAIGNS)}"
             ]
             
+            # Thêm một số parameter với token ngắn hơn để giữ độ dài 200-400 ký tự
             params.extend([
-                f"utm_term={secrets.token_hex(12)}",
-                f"utm_content={secrets.token_hex(15)}",
-                f"utm_id={secrets.token_hex(8)}",
-                f"utm_source_platform={utm_data['source']}_platform",
-                f"utm_campaign_id={random.randint(100000, 999999)}",
-                f"utm_adgroup={secrets.token_hex(10)}",
-                f"utm_keyword={secrets.token_hex(8)}",
-                f"gclid={secrets.token_hex(25)}",
-                f"fbclid={secrets.token_hex(20)}",
-                f"msclkid={secrets.token_hex(18)}",
-                f"ttclid={secrets.token_hex(15)}",
-                f"li_fat_id={secrets.token_hex(12)}",
-                f"twclid={secrets.token_hex(14)}",
-                f"ref={secrets.token_hex(6)}",
-                f"affiliate_id={random.randint(10000, 99999)}",
-                f"promo_code={secrets.token_hex(8)}",
-                f"landing_page_variant=v{random.randint(1,10)}",
-                f"audience_segment={secrets.token_hex(6)}",
-                f"creative_id={secrets.token_hex(8)}",
-                f"placement_id={secrets.token_hex(6)}",
-                f"ad_position={random.choice(['top', 'sidebar', 'bottom', 'popup'])}",
+                f"utm_term={secrets.token_hex(6)}",  # Giảm từ 12 xuống 6
+                f"utm_content={secrets.token_hex(8)}",  # Giảm từ 15 xuống 8
+                f"utm_id={secrets.token_hex(4)}",  # Giảm từ 8 xuống 4
+                f"utm_campaign_id={random.randint(10000, 99999)}",  # Số ngắn hơn
+                f"utm_adgroup={secrets.token_hex(5)}",  # Giảm từ 10 xuống 5
+                f"gclid={secrets.token_hex(12)}",  # Giảm từ 25 xuống 12
+                f"fbclid={secrets.token_hex(10)}",  # Giảm từ 20 xuống 10
+                f"ref={secrets.token_hex(4)}",  # Giảm từ 6 xuống 4
+                f"promo_code={secrets.token_hex(4)}",  # Giảm từ 8 xuống 4
                 f"device_type={random.choice(['mobile', 'desktop', 'tablet'])}",
-                f"session_id={secrets.token_hex(16)}",
+                f"session_id={secrets.token_hex(8)}",  # Giảm từ 16 xuống 8
             ])
             
             query_string = '&'.join(params)
             url = base_url + '?' + query_string
+            
+            # Kiểm tra và điều chỉnh độ dài nếu cần
+            if len(url) > 400:
+                # Nếu vẫn quá dài, loại bỏ một số parameter
+                params = params[:10]  # Chỉ giữ 10 parameter đầu
+                query_string = '&'.join(params)
+                url = base_url + '?' + query_string
+            elif len(url) < 200:
+                # Nếu quá ngắn, thêm parameter để đạt ít nhất 200 ký tự
+                params.append(f"extra_param={secrets.token_hex(10)}")
+                query_string = '&'.join(params)
+                url = base_url + '?' + query_string
         else:
             url = f"{base_url}?utm_source={utm_data['source']}&utm_medium={utm_data['medium']}&utm_campaign={random.choice(CAMPAIGNS)}"
     
@@ -93,10 +95,14 @@ def referrer_page():
     input,button{padding:10px;margin:5px;border:1px solid #ddd;border-radius:4px}
     button{background:#007bff;color:white;cursor:pointer}
     .output{margin-top:20px;padding:15px;background:#f8f9fa;border-radius:4px}
+    .info{background:#e3f2fd;padding:10px;border-radius:4px;margin:10px 0;}
     </style>
     </head>
     <body>
         <h1>UTM Data Generator</h1>
+        <div class="info">
+            <strong>Lưu ý:</strong> Dữ liệu dài sẽ tạo URL có độ dài 200-400 ký tự
+        </div>
         <form id="form">
             <div>
                 <label>Số lượng:</label>
@@ -117,13 +123,14 @@ def referrer_page():
             <div>
                 <label>
                     <input type="checkbox" id="longData"> 
-                    Tạo dữ liệu dài (>200 ký tự)
+                    Tạo dữ liệu dài (200-400 ký tự)
                 </label>
             </div>
             <button type="submit">Generate</button>
         </form>
         <div id="output" class="output" style="display:none">
             <h3>Kết quả:</h3>
+            <div id="stats" class="info"></div>
             <button onclick="download()">Download SQL</button>
             <button onclick="copy()">Copy SQL</button>
             <textarea id="sql" style="width:100%;height:300px" readonly></textarea>
@@ -147,8 +154,15 @@ def referrer_page():
                 body: JSON.stringify(data)
             });
             
-            sqlData = await response.text();
+            const result = await response.json();
+            sqlData = result.sql;
             document.getElementById('sql').value = sqlData;
+            document.getElementById('stats').innerHTML = 
+                `<strong>Thống kê URL:</strong><br/>
+                Độ dài trung bình: ${result.avg_length} ký tự<br/>
+                Độ dài min: ${result.min_length} ký tự<br/>
+                Độ dài max: ${result.max_length} ký tự<br/>
+                Số URL dài (>200): ${result.long_urls_count}`;
             document.getElementById('output').style.display = 'block';
         };
         
@@ -181,7 +195,15 @@ def generate():
     
     records = [generate_record(start_id + i, url_id, long_data) for i in range(count)]
     
+    # Tính toán thống kê độ dài URL
+    url_lengths = [len(r['url']) for r in records if r['url'] != '-']
+    avg_length = sum(url_lengths) / len(url_lengths) if url_lengths else 0
+    min_length = min(url_lengths) if url_lengths else 0
+    max_length = max(url_lengths) if url_lengths else 0
+    long_urls_count = len([l for l in url_lengths if l > 200])
+    
     sql = f"-- Generated {count} UTM records (Long data: {'Yes' if long_data else 'No'})\n"
+    sql += f"-- URL Length Stats: Avg={avg_length:.0f}, Min={min_length}, Max={max_length}, Long URLs(>200)={long_urls_count}\n"
     sql += f"INSERT INTO `{table}` (id, date_added, referrer_id, url, url_id, parameter_pair_group_id, device, win_width, ipa, user_agent) VALUES\n"
     
     for i, r in enumerate(records):
@@ -189,7 +211,13 @@ def generate():
         sql += "," if i < len(records)-1 else ";"
         sql += "\n"
     
-    return sql
+    return jsonify({
+        'sql': sql,
+        'avg_length': round(avg_length, 1),
+        'min_length': min_length,
+        'max_length': max_length,
+        'long_urls_count': long_urls_count
+    })
 
 # For Vercel
 if __name__ == '__main__':
