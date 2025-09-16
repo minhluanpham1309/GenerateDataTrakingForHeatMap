@@ -14,7 +14,7 @@ UTM_SOURCES = [
 
 CAMPAIGNS = ['spring_sale', 'product_launch', 'brand_awareness']
 
-def generate_record(record_id, url_id, long_data=False):
+def generate_record(record_id, url_id, long_data=False, device_choice='all'):
     utm_data = random.choices(UTM_SOURCES, weights=[s['weight'] for s in UTM_SOURCES])[0]
     
     if utm_data['source'] == '-':
@@ -62,6 +62,20 @@ def generate_record(record_id, url_id, long_data=False):
         else:
             url = f"{base_url}?utm_source={utm_data['source']}&utm_medium={utm_data['medium']}&utm_campaign={random.choice(CAMPAIGNS)}"
     
+    # Xử lý device theo lựa chọn
+    if device_choice == 'all':
+        device = random.choice(['d', 'm', 't'])
+        win_width = random.choice([1920, 1366, 375, 768])
+    else:
+        device = device_choice
+        # Thiết lập win_width phù hợp với device
+        if device == 'd':  # desktop
+            win_width = random.choice([1920, 1366, 1440, 1680])
+        elif device == 'm':  # mobile
+            win_width = random.choice([375, 414, 360, 393])
+        else:  # tablet
+            win_width = random.choice([768, 1024, 820, 834])
+    
     return {
         'id': record_id,
         'date_added': '2025-08-22 ' + f"{random.randint(10,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}",
@@ -69,8 +83,8 @@ def generate_record(record_id, url_id, long_data=False):
         'url': url,
         'url_id': url_id,
         'parameter_pair_group_id': 'null',
-        'device': random.choice(['d', 'm', 't']),
-        'win_width': random.choice([1920, 1366, 375, 768]),
+        'device': device,
+        'win_width': win_width,
         'ipa': '0:0:0:0:0:0:0:1',
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
@@ -92,10 +106,11 @@ def referrer_page():
     <html>
     <head><title>UTM Generator</title>
     <style>body{font-family:Arial;max-width:800px;margin:0 auto;padding:20px}
-    input,button{padding:10px;margin:5px;border:1px solid #ddd;border-radius:4px}
+    input,button,select{padding:10px;margin:5px;border:1px solid #ddd;border-radius:4px}
     button{background:#007bff;color:white;cursor:pointer}
     .output{margin-top:20px;padding:15px;background:#f8f9fa;border-radius:4px}
     .info{background:#e3f2fd;padding:10px;border-radius:4px;margin:10px 0;}
+    select{min-width:200px;}
     </style>
     </head>
     <body>
@@ -119,6 +134,15 @@ def referrer_page():
             <div>
                 <label>URL ID:</label>
                 <input type="text" id="urlId" value="172502477">
+            </div>
+            <div>
+                <label>Device:</label>
+                <select id="device">
+                    <option value="all">Tất cả (Random)</option>
+                    <option value="d">Desktop (d)</option>
+                    <option value="m">Mobile (m)</option>
+                    <option value="t">Tablet (t)</option>
+                </select>
             </div>
             <div>
                 <label>
@@ -145,7 +169,8 @@ def referrer_page():
                 start_id: document.getElementById('startId').value,
                 table_name: document.getElementById('table').value,
                 url_id: document.getElementById('urlId').value,
-                long_data: document.getElementById('longData').checked
+                long_data: document.getElementById('longData').checked,
+                device: document.getElementById('device').value
             };
             
             const response = await fetch('/api/generate', {
@@ -162,7 +187,8 @@ def referrer_page():
                 Độ dài trung bình: ${result.avg_length} ký tự<br/>
                 Độ dài min: ${result.min_length} ký tự<br/>
                 Độ dài max: ${result.max_length} ký tự<br/>
-                Số URL dài (>200): ${result.long_urls_count}`;
+                Số URL dài (>200): ${result.long_urls_count}<br/>
+                <strong>Thống kê Device:</strong> ${result.device_display}`;
             document.getElementById('output').style.display = 'block';
         };
         
@@ -192,8 +218,9 @@ def generate():
     table = data.get('table_name', 'test_table')
     url_id = data.get('url_id', '123')
     long_data = data.get('long_data', False)
+    device_choice = data.get('device', 'all')
     
-    records = [generate_record(start_id + i, url_id, long_data) for i in range(count)]
+    records = [generate_record(start_id + i, url_id, long_data, device_choice) for i in range(count)]
     
     # Tính toán thống kê độ dài URL
     url_lengths = [len(r['url']) for r in records if r['url'] != '-']
@@ -202,8 +229,20 @@ def generate():
     max_length = max(url_lengths) if url_lengths else 0
     long_urls_count = len([l for l in url_lengths if l > 200])
     
-    sql = f"-- Generated {count} UTM records (Long data: {'Yes' if long_data else 'No'})\n"
+    # Thống kê device
+    device_stats = {}
+    for r in records:
+        device = r['device']
+        if device not in device_stats:
+            device_stats[device] = 0
+        device_stats[device] += 1
+    
+    device_names = {'d': 'Desktop', 'm': 'Mobile', 't': 'Tablet'}
+    device_display = ', '.join([f"{device_names.get(k, k)}: {v}" for k, v in device_stats.items()])
+    
+    sql = f"-- Generated {count} UTM records (Long data: {'Yes' if long_data else 'No'}, Device: {device_choice})\n"
     sql += f"-- URL Length Stats: Avg={avg_length:.0f}, Min={min_length}, Max={max_length}, Long URLs(>200)={long_urls_count}\n"
+    sql += f"-- Device Stats: {device_display}\n"
     sql += f"INSERT INTO `{table}` (id, date_added, referrer_id, url, url_id, parameter_pair_group_id, device, win_width, ipa, user_agent) VALUES\n"
     
     for i, r in enumerate(records):
@@ -216,7 +255,9 @@ def generate():
         'avg_length': round(avg_length, 1),
         'min_length': min_length,
         'max_length': max_length,
-        'long_urls_count': long_urls_count
+        'long_urls_count': long_urls_count,
+        'device_stats': device_stats,
+        'device_display': device_display
     })
 
 # For Vercel
