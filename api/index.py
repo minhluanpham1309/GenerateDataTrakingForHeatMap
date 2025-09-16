@@ -100,7 +100,7 @@ def referrer_page():
         <form id="form">
             <div>
                 <label>Số lượng:</label>
-                <input type="number" id="count" value="1000" min="10" max="10000">
+                <input type="number" id="count" value="1000" min="10" max="1000000">
             </div>
             <div>
                 <label>ID bắt đầu:</label>
