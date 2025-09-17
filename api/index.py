@@ -14,7 +14,7 @@ UTM_SOURCES = [
 
 CAMPAIGNS = ['spring_sale', 'product_launch', 'brand_awareness']
 
-def generate_record(record_id, url_id, long_data=False, device_choice='all'):
+def generate_record(record_id, url_id, long_data=False, device_choice='all', date_choice='2025-08-22'):
     utm_data = random.choices(UTM_SOURCES, weights=[s['weight'] for s in UTM_SOURCES])[0]
     
     if utm_data['source'] == '-':
@@ -78,7 +78,7 @@ def generate_record(record_id, url_id, long_data=False, device_choice='all'):
     
     return {
         'id': record_id,
-        'date_added': '2025-08-22 ' + f"{random.randint(10,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}",
+        'date_added': date_choice + ' ' + f"{random.randint(0,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}",
         'referrer_id': secrets.token_hex(16),
         'url': url,
         'url_id': url_id,
@@ -95,7 +95,7 @@ def home():
     <h1>UTM Generator</h1>
     <p>Tool tạo dữ liệu UTM tracking</p>
     <a href="/api/" style="color: #007bff; text-decoration: none; font-size: 18px;">
-        → Vào UTM Generator
+        &rarr; Vào UTM Generator
     </a>
     """
 
@@ -116,7 +116,9 @@ def referrer_page():
     <body>
         <h1>UTM Data Generator</h1>
         <div class="info">
-            <strong>Lưu ý:</strong> Dữ liệu dài sẽ tạo URL có độ dài 200-400 ký tự
+            <strong>Lưu ý:</strong> 
+            <br/>• Dữ liệu dài sẽ tạo URL có độ dài 200-400 ký tự
+            <br/>• Giờ sẽ được tạo tự động ngẫu nhiên từ 00:00-23:59
         </div>
         <form id="form">
             <div>
@@ -134,6 +136,10 @@ def referrer_page():
             <div>
                 <label>URL ID:</label>
                 <input type="text" id="urlId" value="172502477">
+            </div>
+            <div>
+                <label>Ngày:</label>
+                <input type="date" id="dateChoice" value="2025-08-22">
             </div>
             <div>
                 <label>Device:</label>
@@ -169,6 +175,7 @@ def referrer_page():
                 start_id: document.getElementById('startId').value,
                 table_name: document.getElementById('table').value,
                 url_id: document.getElementById('urlId').value,
+                date_choice: document.getElementById('dateChoice').value,
                 long_data: document.getElementById('longData').checked,
                 device: document.getElementById('device').value
             };
@@ -183,7 +190,9 @@ def referrer_page():
             sqlData = result.sql;
             document.getElementById('sql').value = sqlData;
             document.getElementById('stats').innerHTML = 
-                `<strong>Thống kê URL:</strong><br/>
+                `<strong>Thông tin tạo:</strong><br/>
+                Ngày: ${data.date_choice}<br/>
+                <strong>Thống kê URL:</strong><br/>
                 Độ dài trung bình: ${result.avg_length} ký tự<br/>
                 Độ dài min: ${result.min_length} ký tự<br/>
                 Độ dài max: ${result.max_length} ký tự<br/>
@@ -217,10 +226,11 @@ def generate():
     start_id = int(data.get('start_id', 1))
     table = data.get('table_name', 'test_table')
     url_id = data.get('url_id', '123')
+    date_choice = data.get('date_choice', '2025-08-22')
     long_data = data.get('long_data', False)
     device_choice = data.get('device', 'all')
     
-    records = [generate_record(start_id + i, url_id, long_data, device_choice) for i in range(count)]
+    records = [generate_record(start_id + i, url_id, long_data, device_choice, date_choice) for i in range(count)]
     
     # Tính toán thống kê độ dài URL
     url_lengths = [len(r['url']) for r in records if r['url'] != '-']
@@ -240,7 +250,7 @@ def generate():
     device_names = {'d': 'Desktop', 'm': 'Mobile', 't': 'Tablet'}
     device_display = ', '.join([f"{device_names.get(k, k)}: {v}" for k, v in device_stats.items()])
     
-    sql = f"-- Generated {count} UTM records (Long data: {'Yes' if long_data else 'No'}, Device: {device_choice})\n"
+    sql = f"-- Generated {count} UTM records (Date: {date_choice}, Long data: {'Yes' if long_data else 'No'}, Device: {device_choice})\n"
     sql += f"-- URL Length Stats: Avg={avg_length:.0f}, Min={min_length}, Max={max_length}, Long URLs(>200)={long_urls_count}\n"
     sql += f"-- Device Stats: {device_display}\n"
     sql += f"INSERT INTO `{table}` (id, date_added, referrer_id, url, url_id, parameter_pair_group_id, device, win_width, ipa, user_agent) VALUES\n"
