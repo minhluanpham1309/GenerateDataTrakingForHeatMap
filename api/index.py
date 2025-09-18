@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
-import random, secrets, json
+import random, secrets, json, hashlib
 from datetime import datetime, timedelta
+from urllib.parse import urlparse, parse_qs
 
 app = Flask(__name__)
 
@@ -14,54 +15,68 @@ UTM_SOURCES = [
 
 CAMPAIGNS = ['spring_sale', 'product_launch', 'brand_awareness']
 
-def generate_record(record_id, url_id, long_data=False, device_choice='all', date_choice='2025-08-22'):
-    utm_data = random.choices(UTM_SOURCES, weights=[s['weight'] for s in UTM_SOURCES])[0]
-    
-    if utm_data['source'] == '-':
-        url = '-'
-    else:
-        base_url = f"https://{utm_data['source']}.com/"
+def generate_url_pool(pool_size, long_data=False):
+    """Tạo pool URLs unique để sử dụng cho duplicate"""
+    urls = []
+    for i in range(pool_size):
+        utm_data = random.choices(UTM_SOURCES, weights=[s['weight'] for s in UTM_SOURCES])[0]
         
-        if long_data:
-            # Tạo URL dài 200-400 ký tự bằng cách giới hạn số parameter
-            params = [
-                f"utm_source={utm_data['source']}",
-                f"utm_medium={utm_data['medium']}", 
-                f"utm_campaign={random.choice(CAMPAIGNS)}"
-            ]
-            
-            # Thêm một số parameter với token ngắn hơn để giữ độ dài 200-400 ký tự
-            params.extend([
-                f"utm_term={secrets.token_hex(6)}",  # Giảm từ 12 xuống 6
-                f"utm_content={secrets.token_hex(8)}",  # Giảm từ 15 xuống 8
-                f"utm_id={secrets.token_hex(4)}",  # Giảm từ 8 xuống 4
-                f"utm_campaign_id={random.randint(10000, 99999)}",  # Số ngắn hơn
-                f"utm_adgroup={secrets.token_hex(5)}",  # Giảm từ 10 xuống 5
-                f"gclid={secrets.token_hex(12)}",  # Giảm từ 25 xuống 12
-                f"fbclid={secrets.token_hex(10)}",  # Giảm từ 20 xuống 10
-                f"ref={secrets.token_hex(4)}",  # Giảm từ 6 xuống 4
-                f"promo_code={secrets.token_hex(4)}",  # Giảm từ 8 xuống 4
-                f"device_type={random.choice(['mobile', 'desktop', 'tablet'])}",
-                f"session_id={secrets.token_hex(8)}",  # Giảm từ 16 xuống 8
-            ])
-            
-            query_string = '&'.join(params)
-            url = base_url + '?' + query_string
-            
-            # Kiểm tra và điều chỉnh độ dài nếu cần
-            if len(url) > 400:
-                # Nếu vẫn quá dài, loại bỏ một số parameter
-                params = params[:10]  # Chỉ giữ 10 parameter đầu
-                query_string = '&'.join(params)
-                url = base_url + '?' + query_string
-            elif len(url) < 200:
-                # Nếu quá ngắn, thêm parameter để đạt ít nhất 200 ký tự
-                params.append(f"extra_param={secrets.token_hex(10)}")
-                query_string = '&'.join(params)
-                url = base_url + '?' + query_string
+        if utm_data['source'] == '-':
+            url = '-'
         else:
+            base_url = f"https://{utm_data['source']}.com/"
+            
+            if long_data:
+                # Tạo URL dài 200-400 ký tự
+                params = [
+                    f"utm_source={utm_data['source']}",
+                    f"utm_medium={utm_data['medium']}", 
+                    f"utm_campaign={random.choice(CAMPAIGNS)}"
+                ]
+                
+                params.extend([
+                    f"utm_term={secrets.token_hex(6)}",
+                    f"utm_content={secrets.token_hex(8)}",
+                    f"utm_id={secrets.token_hex(4)}",
+                    f"utm_campaign_id={random.randint(10000, 99999)}",
+                    f"utm_adgroup={secrets.token_hex(5)}",
+                    f"gclid={secrets.token_hex(12)}",
+                    f"fbclid={secrets.token_hex(10)}",
+                    f"ref={secrets.token_hex(4)}",
+                    f"promo_code={secrets.token_hex(4)}",
+                    f"device_type={random.choice(['mobile', 'desktop', 'tablet'])}",
+                    f"session_id={secrets.token_hex(8)}",
+                ])
+                
+                query_string = '&'.join(params)
+                url = base_url + '?' + query_string
+                
+                if len(url) > 400:
+                    params = params[:10]
+                    query_string = '&'.join(params)
+                    url = base_url + '?' + query_string
+                elif len(url) < 200:
+                    params.append(f"extra_param={secrets.token_hex(10)}")
+                    query_string = '&'.join(params)
+                    url = base_url + '?' + query_string
+            else:
+                url = f"{base_url}?utm_source={utm_data['source']}&utm_medium={utm_data['medium']}&utm_campaign={random.choice(CAMPAIGNS)}"
+        
+        urls.append(url)
+    return urls
+
+def generate_record(record_id, url_id, device_choice='all', date_choice='2025-08-22', url_pool=None):
+    # Nếu có url_pool, chọn URL từ pool, nếu không tạo mới
+    if url_pool:
+        url = random.choice(url_pool)
+    else:
+        # Logic tạo URL cũ (fallback)
+        utm_data = random.choices(UTM_SOURCES, weights=[s['weight'] for s in UTM_SOURCES])[0]
+        if utm_data['source'] == '-':
+            url = '-'
+        else:
+            base_url = f"https://{utm_data['source']}.com/"
             url = f"{base_url}?utm_source={utm_data['source']}&utm_medium={utm_data['medium']}&utm_campaign={random.choice(CAMPAIGNS)}"
-    
     # Xử lý device theo lựa chọn
     if device_choice == 'all':
         device = random.choice(['d', 'm', 't'])
@@ -76,13 +91,29 @@ def generate_record(record_id, url_id, long_data=False, device_choice='all', dat
         else:  # tablet
             win_width = random.choice([768, 1024, 820, 834])
     
+    # Tính parameter_pair_group_id từ MD5 hash của query string
+    if url == '-':
+        parameter_pair_group_id = 'null'
+    else:
+        try:
+            parsed_url = urlparse(url)
+            query_string = parsed_url.query
+            if query_string:
+                # Tạo MD5 hash từ query string
+                md5_hash = hashlib.md5(query_string.encode('utf-8')).hexdigest()
+                parameter_pair_group_id = f"'{md5_hash}'"
+            else:
+                parameter_pair_group_id = 'null'
+        except:
+            parameter_pair_group_id = 'null'
+    
     return {
         'id': record_id,
-        'date_added': date_choice + ' ' + f"{random.randint(0,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}",
+        'date_added': date_choice + ' ' + f"{random.randint(10,23):02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}",
         'referrer_id': secrets.token_hex(16),
         'url': url,
         'url_id': url_id,
-        'parameter_pair_group_id': 'null',
+        'parameter_pair_group_id': parameter_pair_group_id,
         'device': device,
         'win_width': win_width,
         'ipa': '0:0:0:0:0:0:0:1',
@@ -111,6 +142,8 @@ def referrer_page():
     .output{margin-top:20px;padding:15px;background:#f8f9fa;border-radius:4px}
     .info{background:#e3f2fd;padding:10px;border-radius:4px;margin:10px 0;}
     select{min-width:200px;}
+    small{display:block;margin-top:5px;margin-left:5px;}
+    label{display:inline-block;min-width:150px;vertical-align:top;}
     </style>
     </head>
     <body>
@@ -118,7 +151,9 @@ def referrer_page():
         <div class="info">
             <strong>Lưu ý:</strong> 
             <br/>• Dữ liệu dài sẽ tạo URL có độ dài 200-400 ký tự
-            <br/>• Giờ sẽ được tạo tự động ngẫu nhiên từ 00:00-23:59
+            <br/>• Giờ sẽ được tạo tự động ngẫu nhiên từ 10:00-23:59
+            <br/>• Tỷ lệ URL trùng: 0% = tất cả unique, 50% = một nửa URL sẽ trùng lặp với nhau
+            <br/>• parameter_pair_group_id sẽ là MD5 hash của query string (null cho direct traffic)
         </div>
         <form id="form">
             <div>
@@ -156,6 +191,11 @@ def referrer_page():
                     Tạo dữ liệu dài (200-400 ký tự)
                 </label>
             </div>
+            <div>
+                <label>Tỷ lệ URL trùng lặp (%):</label>
+                <input type="number" id="duplicateRate" value="0" min="0" max="95" step="5">
+                <small style="color: #666;">0% = Tất cả URL unique, 50% = Khoảng 50% URL sẽ trùng nhau</small>
+            </div>
             <button type="submit">Generate</button>
         </form>
         <div id="output" class="output" style="display:none">
@@ -177,7 +217,8 @@ def referrer_page():
                 url_id: document.getElementById('urlId').value,
                 date_choice: document.getElementById('dateChoice').value,
                 long_data: document.getElementById('longData').checked,
-                device: document.getElementById('device').value
+                device: document.getElementById('device').value,
+                duplicate_rate: document.getElementById('duplicateRate').value
             };
             
             const response = await fetch('/api/generate', {
@@ -197,6 +238,11 @@ def referrer_page():
                 Độ dài min: ${result.min_length} ký tự<br/>
                 Độ dài max: ${result.max_length} ký tự<br/>
                 Số URL dài (>200): ${result.long_urls_count}<br/>
+                <strong>Thống kê Duplication:</strong><br/>
+                Target: ${result.duplicate_rate_target}% | Actual: ${result.duplicate_rate_actual}%<br/>
+                Unique URLs: ${result.unique_urls}<br/>
+                <strong>Parameter Groups (MD5):</strong><br/>
+                Unique hashes: ${result.unique_param_groups} | Direct traffic: ${result.null_param_groups}<br/>
                 <strong>Thống kê Device:</strong> ${result.device_display}`;
             document.getElementById('output').style.display = 'block';
         };
@@ -229,8 +275,25 @@ def generate():
     date_choice = data.get('date_choice', '2025-08-22')
     long_data = data.get('long_data', False)
     device_choice = data.get('device', 'all')
+    duplicate_rate = float(data.get('duplicate_rate', 0))
     
-    records = [generate_record(start_id + i, url_id, long_data, device_choice, date_choice) for i in range(count)]
+    # Tính toán số unique URLs cần thiết dựa trên duplicate_rate
+    if duplicate_rate == 0:
+        # 0% duplicate = tất cả unique
+        unique_url_count = count
+    else:
+        # Ví dụ: 30% duplicate nghĩa là 70% unique
+        unique_rate = (100 - duplicate_rate) / 100
+        unique_url_count = max(1, int(count * unique_rate))
+    
+    # Tạo pool URLs unique
+    url_pool = generate_url_pool(unique_url_count, long_data)
+    
+    # Generate records sử dụng URL pool
+    records = []
+    for i in range(count):
+        record = generate_record(start_id + i, url_id, device_choice, date_choice, url_pool)
+        records.append(record)
     
     # Tính toán thống kê độ dài URL
     url_lengths = [len(r['url']) for r in records if r['url'] != '-']
@@ -239,7 +302,16 @@ def generate():
     max_length = max(url_lengths) if url_lengths else 0
     long_urls_count = len([l for l in url_lengths if l > 200])
     
-    # Thống kê device
+    # Thống kê parameter_pair_group_id
+    param_groups = {}
+    for r in records:
+        pgid = r['parameter_pair_group_id']
+        if pgid not in param_groups:
+            param_groups[pgid] = 0
+        param_groups[pgid] += 1
+    
+    unique_param_groups = len([k for k in param_groups.keys() if k != 'null'])
+    null_param_groups = param_groups.get('null', 0)
     device_stats = {}
     for r in records:
         device = r['device']
@@ -247,10 +319,24 @@ def generate():
             device_stats[device] = 0
         device_stats[device] += 1
     
+    # Thống kê URL duplicates
+    url_counts = {}
+    for r in records:
+        url = r['url']
+        if url not in url_counts:
+            url_counts[url] = 0
+        url_counts[url] += 1
+    
+    unique_urls = len(url_counts)
+    duplicate_urls = len([count for count in url_counts.values() if count > 1])
+    actual_duplicate_rate = (count - unique_urls) / count * 100 if count > 0 else 0
+    
     device_names = {'d': 'Desktop', 'm': 'Mobile', 't': 'Tablet'}
     device_display = ', '.join([f"{device_names.get(k, k)}: {v}" for k, v in device_stats.items()])
     
     sql = f"-- Generated {count} UTM records (Date: {date_choice}, Long data: {'Yes' if long_data else 'No'}, Device: {device_choice})\n"
+    sql += f"-- URL Duplication: Target={duplicate_rate}%, Actual={actual_duplicate_rate:.1f}%, Unique URLs={unique_urls}\n"
+    sql += f"-- Parameter Groups: Unique MD5 hashes={unique_param_groups}, Direct traffic (null)={null_param_groups}\n"
     sql += f"-- URL Length Stats: Avg={avg_length:.0f}, Min={min_length}, Max={max_length}, Long URLs(>200)={long_urls_count}\n"
     sql += f"-- Device Stats: {device_display}\n"
     sql += f"INSERT INTO `{table}` (id, date_added, referrer_id, url, url_id, parameter_pair_group_id, device, win_width, ipa, user_agent) VALUES\n"
@@ -267,7 +353,12 @@ def generate():
         'max_length': max_length,
         'long_urls_count': long_urls_count,
         'device_stats': device_stats,
-        'device_display': device_display
+        'device_display': device_display,
+        'unique_urls': unique_urls,
+        'duplicate_rate_target': duplicate_rate,
+        'duplicate_rate_actual': round(actual_duplicate_rate, 1),
+        'unique_param_groups': unique_param_groups,
+        'null_param_groups': null_param_groups
     })
 
 # For Vercel
